@@ -1,0 +1,119 @@
+---
+title: "Prediction Assignment"
+author: "Augusto Ielo"
+date: "March 6 2016"
+output: html_document
+---
+
+#Overview
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+The goal of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants in order to predict the fashion (class) in wich they did the exercise:
+
+*exactly according to the specification (Class A)
+*throwing the elbows to the front (Class B)
+*lifting the dumbbell only halfway (Class C)
+*lowering the dumbbell only halfway (Class D)
+*throwing the hips to the front (Class E)
+
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The training data for this project are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+# Loading libraries
+
+```{r warning=FALSE, message=FALSE}
+library(caret)
+library(randomForest)
+library(Hmisc)
+library(e1071)
+library(foreach)
+library(doParallel)
+library(RCurl)
+#set.seed(4356)
+```
+
+# Loading data
+
+```{r cache=TRUE}
+trainDataURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testDataURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+trainData <- read.csv(text=getURL(trainDataURL), na.strings=c("", "NA"))
+testData <- read.csv(text=getURL(testDataURL), na.strings=c("", "NA"))
+```
+
+We can remove some uneffective columns from the dataset. The first column of the dataset is an index, similarly the username and timestamp information should not have effects on
+whether activities are correctly performed or not.
+frame.
+
+```{r}
+unusedCols <- c("X", "user_name", "raw_timestamp_part_1",
+                    "raw_timestamp_part_2", "cvtd_timestamp")
+for (col in unusedCols) {
+    trainData[, col] <- NULL
+}
+```
+
+There are many missing values in the dataset. We are going to remove features that have too many missing values from the training and testing data.
+
+
+```{r}
+NAs <- apply(trainData,2,function(x) {sum(is.na(x))})
+trainData <- trainData[,which(NAs == 0)]
+```
+
+We're going to perform the nearZeroVar function from the caret package, to remove from the dataset the predictors that have one unique value (i.e. are zero variance predictors) or the predictors that are have both of the following characteristics: they have very few unique values relative to the number of samples and the ratio of the frequency of the most common value to the frequency of the second most common value is large.
+
+```{r message=FALSE}
+nsv <- nearZeroVar(trainData)
+trainData <- trainData[-nsv]
+testData <- testData[-nsv]
+```
+
+Here is the final set of predictors used for our classification.
+
+```{r}
+names(trainData)
+```
+
+# Model
+
+We're going now to set up a random forest classifier to predict the action classe. In order to measure the accuracy of our model, we're going to perform a 10 fold cross validation with 80:20 split, on each fold, so 80% of the data is used for training the random forest and the remaining 20% is used for test.
+
+```{r cache=TRUE}
+#set the seed for reproducibility
+set.seed(9999)
+
+obs <- c()
+preds <- c()
+for(i in 1:10) {
+    intrain = sample(1:dim(trainData)[1], size=dim(trainData)[1] * 0.8, replace=F)
+    trainCross = trainData[intrain,]
+    testCross = trainData[-intrain,]
+    rf <- randomForest(classe ~ ., data=trainCross)
+    obs <- c(obs, testCross$classe)
+    preds <- c(preds, predict(rf, testCross))
+}
+
+```
+
+The confusion matrix for predictions on cross validation folds is given below.
+
+```{r}
+confMatrix <- confusionMatrix(table(preds, obs))
+confMatrix
+```
+
+The above model seems classifying pretty good, with an accuracy of `r confMatrix$overall[[1]] * 100`%, and misclassifies only few instances. 
+Finally, we can train the random forest with the entire dataset, in order to predict the class of action, given the set of activity measurements.
+
+```{r cache=TRUE}
+model <- randomForest(classe ~ ., data=trainData)
+model
+```
